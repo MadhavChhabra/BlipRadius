@@ -73,12 +73,12 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.text('orders-exp-api'), findsWidgets);
-    expect(find.text('Change impact'), findsWidgets);
-    expect(find.text('Relationships'), findsWidgets);
-    expect(find.text('History'), findsWidgets);
+    expect(find.text('What breaks'), findsWidgets);
+    expect(find.text('Who calls this'), findsWidgets);
+    expect(find.text('Past changes'), findsWidgets);
 
     // Per-endpoint traffic and the consumer list now share one surface.
-    await tester.tap(find.text('Relationships'));
+    await tester.tap(find.text('Who calls this'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(find.textContaining('Called by'), findsWidgets);
@@ -120,7 +120,7 @@ void main() {
             initialApi: 'orders-exp-api',
             open: noopOpen));
 
-    await tester.tap(find.text('Relationships'));
+    await tester.tap(find.text('Who calls this'));
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);

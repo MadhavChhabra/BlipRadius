@@ -27,6 +27,7 @@ void main() {
     ));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
+    await dismissOpeningAsk(tester);
   }
 
   Future<void> settle(WidgetTester tester) async {

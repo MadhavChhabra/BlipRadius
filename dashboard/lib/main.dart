@@ -36,7 +36,10 @@ class NavTarget {
   const NavTarget({this.api, this.endpoint, this.field});
 }
 
-typedef OpenFn = void Function(int index, {String? api, String? endpoint, String? field});
+/// [check] opens the hub straight on "check a change" — the step that follows a blast radius,
+/// so the map can hand the user to the next thing rather than to a screen they must re-navigate.
+typedef OpenFn = void Function(int index,
+    {String? api, String? endpoint, String? field, bool check});
 
 class ApiGuardApp extends StatelessWidget {
   const ApiGuardApp({super.key});
@@ -171,13 +174,13 @@ class _HomeShellState extends State<HomeShell> {
     _writeHash();
   }
 
-  void _open(int index, {String? api, String? endpoint, String? field}) {
+  void _open(int index, {String? api, String? endpoint, String? field, bool check = false}) {
     setState(() {
       _index = index;
       _target = NavTarget(api: api, endpoint: endpoint, field: field);
-      // Without this the flag stuck: after using "Check a change" once, every later jump — a node,
-      // a consumer row, a finding — kept landing on that mode instead of field lookup.
-      _checkChange = false;
+      // Without resetting this the flag stuck: after using "Check a change" once, every later jump
+      // — a node, a consumer row, a finding — kept landing on that mode instead of field lookup.
+      _checkChange = check;
     });
     _writeHash();
   }
@@ -252,7 +255,10 @@ class _HomeShellState extends State<HomeShell> {
             key: ValueKey('estate:${_target?.api}'),
             api: api,
             open: _open,
-            initialFocus: _target?.api);
+            initialFocus: _target?.api,
+            // The shell owns onboarding: the canvas may ask its opening question here, but not
+            // when it is embedded elsewhere or opened straight onto a shared blast-radius link.
+            openingAsk: _target?.api == null);
     }
   }
 

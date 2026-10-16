@@ -115,10 +115,12 @@ class _ApiHubScreenState extends State<ApiHubScreen> {
               child: TabBar(
                 isScrollable: true,
                 tabAlignment: TabAlignment.start,
+                // Named for the question each one answers. "Relationships" and "Change impact"
+                // describe the data; a developer arrives with a question, not a data model.
                 tabs: [
-                  Tab(text: 'Change impact'),
-                  Tab(text: 'Relationships'),
-                  Tab(text: 'History'),
+                  Tab(text: 'What breaks'),
+                  Tab(text: 'Who calls this'),
+                  Tab(text: 'Past changes'),
                 ],
               ),
             ),

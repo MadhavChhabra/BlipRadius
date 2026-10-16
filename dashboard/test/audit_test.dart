@@ -15,7 +15,7 @@ void main() {
 
     await pumpScreen(
       tester,
-      SourcesScreen(api: fakeApi(), open: (int _, {String? api, String? endpoint, String? field}) {}),
+      SourcesScreen(api: fakeApi(), open: noopOpen),
     );
 
     // The collapsible panel is present but events are lazy-loaded on expand.

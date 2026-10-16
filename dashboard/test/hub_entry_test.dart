@@ -13,7 +13,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
 
     // Not opened on orders-exp-api (first alphabetically) or anything else.
-    expect(find.text('Change impact'), findsNothing);
+    expect(find.text('What breaks'), findsNothing);
     expect(find.text('API hub'), findsOneWidget);
     expect(find.textContaining('Pick the API you are about to touch'), findsOneWidget);
 
@@ -30,8 +30,8 @@ void main() {
     await tester.tap(find.text('orders-exp-api').first);
     await tester.pump(const Duration(milliseconds: 300));
 
-    expect(find.text('Change impact'), findsOneWidget);
-    expect(find.text('Relationships'), findsOneWidget);
+    expect(find.text('What breaks'), findsOneWidget);
+    expect(find.text('Who calls this'), findsOneWidget);
   });
 
   testWidgets('an explicit API still opens straight away', (tester) async {
@@ -39,7 +39,7 @@ void main() {
         ApiHubScreen(api: fakeApi(), open: noopOpen, initialApi: 'orders-proc-api'));
     await tester.pump(const Duration(milliseconds: 200));
 
-    expect(find.text('Change impact'), findsOneWidget);
+    expect(find.text('What breaks'), findsOneWidget);
     expect(find.textContaining('Pick the API you are about to touch'), findsNothing);
   });
 }

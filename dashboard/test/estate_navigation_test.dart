@@ -76,7 +76,8 @@ void main() {
     late Rect covered;
     for (final element in find.byType(Text).evaluate()) {
       final name = (element.widget as Text).data;
-      if (name == null || !name.startsWith('backend-api-')) continue;
+      // Any node label will do — which band it belongs to depends on the opening zoom.
+      if (name == null || !name.contains('-api-')) continue;
       final r = tester.getRect(find.byWidget(element.widget));
       if (r.right > panelLeft) {
         coveredName = name;
@@ -128,23 +129,39 @@ void main() {
 
   testWidgets('a huge estate says how much of itself it is showing', (tester) async {
     await pumpEstate(tester, apis: 1000);
-    expect(find.textContaining('Zoom in to read names'), findsOneWidget);
+    // The map opens at a legible zoom rather than fitting 1000 nodes into a mosaic, so the chip
+    // has to say what is off screen — and offer the way to reach it.
+    expect(find.textContaining('of 1000 APIs'), findsOneWidget);
+    expect(find.textContaining('or search for one'), findsOneWidget);
   });
 
   testWidgets('nodes stay clickable when the map draws plates instead of cards',
       (tester) async {
     await pumpEstate(tester, apis: 1000);
-    // Plate mode is on, so there are no node cards to tap — only painted plates.
-    expect(find.textContaining('Zoom in to read names'), findsOneWidget);
     expect(find.text('WHO YOU HAVE TO TELL'), findsNothing);
+
+    // The map now opens at a readable zoom, so zoom out only as far as plate mode needs — going to
+    // minimum zoom shrinks the rows below the sampling step used to find one.
+    for (var i = 0; i < 8; i++) {
+      if (find.textContaining('Zoom in to read names').evaluate().isNotEmpty) break;
+      await tester.tap(find.byIcon(Icons.remove));
+      await tester.pump(const Duration(milliseconds: 60));
+    }
+    expect(find.textContaining('Zoom in to read names'), findsOneWidget,
+        reason: 'zooming out far enough must reach plate mode');
 
     // Walk a short line across the middle of the map so the assertion does not depend on a node
     // happening to sit under one exact pixel — the rows are 120 apart, so this crosses several.
     final map = tester.getRect(theMap());
-    for (double dy = -160; dy <= 160; dy += 20) {
-      await tester.tapAt(Offset(map.center.dx, map.center.dy + dy));
-      await tester.pump(const Duration(milliseconds: 250));
-      if (find.text('WHO YOU HAVE TO TELL').evaluate().isNotEmpty) break;
+    // Sweep a small grid rather than a single line: at plate zoom the rows are thin and the
+    // columns have real gaps between them, so one column of samples can miss every plate.
+    outer:
+    for (double dx = -120; dx <= 120; dx += 30) {
+      for (double dy = -90; dy <= 90; dy += 9) {
+        await tester.tapAt(Offset(map.center.dx + dx, map.center.dy + dy));
+        await tester.pump(const Duration(milliseconds: 60));
+        if (find.text('WHO YOU HAVE TO TELL').evaluate().isNotEmpty) break outer;
+      }
     }
 
     expect(find.text('WHO YOU HAVE TO TELL'), findsOneWidget,

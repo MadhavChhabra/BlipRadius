@@ -1,16 +1,29 @@
-# apiguard_dashboard
+# BlipRadius Dashboard
 
-A new Flutter project.
+Flutter Web front end for the BlipRadius server. It shows the API dependency map, the blast radius of a spec change, the API hub and generated changelogs.
 
-## Getting Started
+## Screens
 
-This project is a starting point for a Flutter application.
+| Screen | What it shows |
+|---|---|
+| Estate map (`graph_screen.dart`) | APIs, flows and consumers as a dependency graph, with impact paths highlighted |
+| API hub (`api_hub_screen.dart`) | Every API in the estate, its consumers and freshness |
+| Changelog (`changelog_screen.dart`) | Classified changes: breaking, added, changed, removed |
+| Sources (`sources_screen.dart`) | Anypoint connection and repos to scan, with sync progress |
 
-A few resources to get you started if this is your first Flutter project:
+## Run
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+Start the server first (see the main [README](../README.md)), then:
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```bash
+flutter pub get
+flutter run -d chrome     # talks to the server on http://localhost:8080
+```
+
+## Test
+
+```bash
+flutter test
+```
+
+The widget tests run against a fake API client, so they need no server.

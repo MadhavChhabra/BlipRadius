@@ -7,6 +7,20 @@ import '../widgets.dart';
 
 enum _Filter { all, breakingOnly, recent }
 
+/// Whether a generated changelog actually records a breaking change.
+///
+/// Every entry carries a summary line of the form `_3 changes, 1 breaking._`, so the obvious
+/// substring test for "breaking" is true even when the count is zero — which made the "Breaking
+/// only" filter a no-op and painted every card's accent bar red, including additive-only and
+/// no-change entries. Read the count, and fall back to the generator's own section heading.
+bool entryIsBreaking(String markdown) {
+  final summary = RegExp(r'(\d+)\s+breaking').firstMatch(markdown.toLowerCase());
+  if (summary != null) {
+    return (int.tryParse(summary.group(1)!) ?? 0) > 0;
+  }
+  return markdown.toLowerCase().contains('breaking changes');
+}
+
 class ChangelogScreen extends StatefulWidget {
   final ApiClient api;
   const ChangelogScreen({super.key, required this.api});
@@ -41,7 +55,7 @@ class _ChangelogScreenState extends State<ChangelogScreen> {
 
   bool _matches(ChangelogEntry e) => switch (_filter) {
         _Filter.all => true,
-        _Filter.breakingOnly => e.markdown.toLowerCase().contains('breaking'),
+        _Filter.breakingOnly => entryIsBreaking(e.markdown),
         _Filter.recent => _within30Days(e.publishedAt),
       };
 
@@ -181,7 +195,7 @@ class _ChangelogCard extends StatelessWidget {
     return AppColors.textFaint;
   }
 
-  static bool _isBreaking(String markdown) => markdown.toLowerCase().contains('breaking');
+  static bool _isBreaking(String markdown) => entryIsBreaking(markdown);
 
   @override
   Widget build(BuildContext context) {

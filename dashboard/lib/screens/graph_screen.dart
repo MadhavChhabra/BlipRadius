@@ -10,6 +10,7 @@ import '../main.dart';
 import '../pins.dart';
 import '../theme.dart';
 import '../widgets.dart';
+import '../util/file_upload.dart' as web_util;
 import '../widgets/global_search.dart';
 import '../widgets/skeleton.dart';
 import 'first_run.dart';
@@ -22,7 +23,19 @@ class GraphScreen extends StatefulWidget {
 
   /// Node to open focused, from a shared link.
   final String? initialFocus;
-  const GraphScreen({super.key, required this.api, this.open, this.initialFocus});
+
+  /// Whether this canvas may show the one-time "which API are you changing?" prompt. Onboarding is
+  /// the shell's decision, not the map's — the map is also embedded in tests and in focused links
+  /// where an opening question would be noise.
+  final bool openingAsk;
+
+  const GraphScreen({
+    super.key,
+    required this.api,
+    this.open,
+    this.initialFocus,
+    this.openingAsk = false,
+  });
 
   @override
   State<GraphScreen> createState() => _GraphScreenState();
@@ -76,6 +89,26 @@ class _GraphScreenState extends State<GraphScreen> {
   /// copy-pasteable without the canvas knowing about routing.
   void _focus(String? id) => setState(() => _focused = id);
 
+  /// What the very first sync should land on. A brand-new user who has just waited for a scan has
+  /// earned an answer, not an empty canvas and a question — so the estate opens focused on its
+  /// most depended-on API, with the blast radius already drawn.
+  void _loadAndShowAnswer() {
+    widget.api.invalidateGraph();
+    _load();
+    _graph!.then((g) {
+      if (!mounted || _focused != null) return;
+      final ranked = g.nodes.where((n) => n.api && n.dependedOnBy > 0).toList()
+        ..sort((a, b) {
+          final byFanIn = b.dependedOnBy.compareTo(a.dependedOnBy);
+          return byFanIn != 0 ? byFanIn : a.id.compareTo(b.id);
+        });
+      if (ranked.isEmpty) return;
+      // Landing on an answer *is* the answer to "what is this for", so the opening ask is spent.
+      web_util.storeSetting(_EstateState._heroSeenKey, '1');
+      setState(() => _focused = ranked.first.id);
+    }).catchError((_) {});
+  }
+
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<GraphDto>(
@@ -101,10 +134,7 @@ class _GraphScreenState extends State<GraphScreen> {
           return _FirstRunCanvas(
             api: widget.api,
             open: widget.open,
-            onDone: () {
-              widget.api.invalidateGraph();
-              _load();
-            },
+            onDone: _loadAndShowAnswer,
           );
         }
         return _Estate(
@@ -126,6 +156,7 @@ class _GraphScreenState extends State<GraphScreen> {
                 : {..._hiddenLayers, l};
           }),
           open: widget.open,
+          openingAsk: widget.openingAsk,
         );
       },
     );
@@ -255,9 +286,15 @@ class _Layout {
   static const layers = ['APP', 'EXPERIENCE', 'PROCESS', 'SYSTEM', 'BACKEND'];
   static const widths = [190.0, 220.0, 220.0, 190.0, 190.0];
   static const gutters = [80.0, 80.0, 40.0, 80.0];
-  static const subGutter = 26.0;
+  /// Air between the sub-columns a wrapped layer spills into. It has to be wide enough that a
+  /// seven-column band still reads as one band and not as a wall of tiles.
+  static const subGutter = 52.0;
+
+  /// A wrapped band needs more than the comp's gutter to stay distinct from the next layer —
+  /// otherwise the sub-column gap and the band gap look identical and the columns run together.
+  static const wrappedBandExtra = 72.0;
   static const rowTop = 276.0;
-  static const rowPitch = 120.0;
+  static const rowPitch = 134.0;
   static const nodeHeight = 62.0;
   static const headerOffset = 66.0;
   static const nodeAnchor = 24.0;
@@ -309,6 +346,7 @@ class _Estate extends StatefulWidget {
   final ValueChanged<bool> onRiskOnly;
   final ValueChanged<String> onToggleLayer;
   final OpenFn? open;
+  final bool openingAsk;
 
   const _Estate({
     required this.api,
@@ -325,6 +363,7 @@ class _Estate extends StatefulWidget {
     required this.onRiskOnly,
     required this.onToggleLayer,
     required this.open,
+    required this.openingAsk,
   });
 
   @override
@@ -385,6 +424,18 @@ class _EstateState extends State<_Estate> with TickerProviderStateMixin {
   /// (drawing plates, nodes in view). Published from inside the transform builder, so the hint that
   /// explains the plates is written a frame later rather than mid-layout.
   final _density = ValueNotifier<(bool, int)>((false, 0));
+
+  /// The opening question is shown until the user has answered it once, ever. It is onboarding,
+  /// not chrome — a permanent overlay would be worse than no overlay.
+  static const _heroSeenKey = 'seenEstateAsk';
+  late bool _heroDismissed =
+      !widget.openingAsk || web_util.loadStoredSetting(_heroSeenKey) != null;
+
+  void _dismissHero() {
+    if (_heroDismissed) return;
+    web_util.storeSetting(_heroSeenKey, '1');
+    setState(() => _heroDismissed = true);
+  }
 
   @override
   void initState() {
@@ -537,7 +588,10 @@ class _EstateState extends State<_Estate> with TickerProviderStateMixin {
         tallest = math.max(tallest, math.min(nodes.length, rows));
         right = x + columns * width + (columns - 1) * _Layout.subGutter;
       }
-      x += columns * width + (columns - 1) * _Layout.subGutter + gutter;
+      x += columns * width +
+          (columns - 1) * _Layout.subGutter +
+          gutter +
+          (columns > 1 ? _Layout.wrappedBandExtra : 0);
     }
 
     _canvasW = right + 60;
@@ -625,14 +679,20 @@ class _EstateState extends State<_Estate> with TickerProviderStateMixin {
     return Offset(v.x, v.y);
   }
 
-  /// Fit the estate into the part of the window the panels leave free — never so far out that the
-  /// node names stop being readable; a huge estate opens at its top-left instead.
-  void _fit() {
+  /// Fit the estate into the part of the window the panels leave free.
+  ///
+  /// [opening] is the view the map is *first* shown at, and it is deliberately not a fit. Fitting a
+  /// thousand-node estate means 0.3x, where every card is a tile and the whole thing reads as one
+  /// squashed mosaic. The opening view instead guarantees a comfortable, legible zoom and lets the
+  /// user pan — the "showing N of M" chip says what is off screen. The Fit control still does a
+  /// true fit, because sometimes the whole shape *is* the question.
+  void _fit({bool opening = false}) {
     if (_viewport == Size.zero) return;
     final w = _viewport.width - _chrome.horizontal;
     final h = _viewport.height - _chrome.vertical;
     if (w <= 0 || h <= 0) return;
-    final s = math.min(w / _canvasW, h / _canvasH).clamp(0.32, 1.0);
+    final exact = math.min(w / _canvasW, h / _canvasH);
+    final s = opening ? exact.clamp(0.62, 1.0) : exact.clamp(0.18, 1.0);
     final dx = _chrome.left + math.max(0, (w - _canvasW * s) / 2);
     final dy = _chrome.top + math.max(0, (h - _canvasH * s) / 2);
     _tc.value = Matrix4.identity()
@@ -663,7 +723,8 @@ class _EstateState extends State<_Estate> with TickerProviderStateMixin {
       if (!mounted) return;
       final focus = FocusState.instance;
       focus.onClose = () => widget.onFocus(null);
-      focus.onOpenHub = () => widget.open?.call(Tabs.apiHub, api: widget.focused);
+      // The step after "who breaks" is "check the change", not "here is another screen".
+      focus.onOpenHub = () => widget.open?.call(Tabs.apiHub, api: widget.focused, check: true);
       focus.onDirection = (i) => widget.onDirection(FocusDirection.values[i]);
       focus.set(widget.focused,
           hops: _pathEdges.length,
@@ -700,7 +761,7 @@ class _EstateState extends State<_Estate> with TickerProviderStateMixin {
                   if (widget.focused != null) {
                     _centreOn(widget.focused!);
                   } else {
-                    _fit();
+                    _fit(opening: true);
                   }
                 });
               }
@@ -775,13 +836,16 @@ class _EstateState extends State<_Estate> with TickerProviderStateMixin {
                 valueListenable: _density,
                 builder: (context, value, _) {
                   final (plates, shown) = value;
-                  if (!plates || focusing) return const SizedBox.shrink();
+                  final total = widget.graph.nodes.length;
+                  // The map opens at a legible zoom rather than fitting everything, so saying how
+                  // much of the estate is off screen matters at every zoom, not only in plate mode.
+                  if (focusing || shown >= total) return const SizedBox.shrink();
                   return GlassPanel(
                     radius: AppRadius.pill,
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
                     child: Text(
-                      'Showing $shown of ${widget.graph.nodes.length} APIs · '
-                      'Zoom in to read names, or search for one',
+                      'Showing $shown of $total APIs · '
+                      '${plates ? "Zoom in to read names" : "Drag to explore"}, or search for one',
                       style: monoData(size: 10.5),
                     ),
                   );
@@ -789,6 +853,19 @@ class _EstateState extends State<_Estate> with TickerProviderStateMixin {
               ),
             ),
           ),
+          // The map is the evidence, not the job. Until the user has picked an API once, the
+          // canvas states the question it exists to answer — then gets out of the way for good.
+          if (!focusing && !_heroDismissed)
+            Positioned.fill(
+              child: _HeroAsk(
+                api: widget.api,
+                onPick: (id) {
+                  _dismissHero();
+                  widget.onFocus(id);
+                },
+                onExplore: _dismissHero,
+              ),
+            ),
           Positioned(
             left: 0,
             right: 0,
@@ -843,11 +920,11 @@ class _EstateState extends State<_Estate> with TickerProviderStateMixin {
     for (final e in _pathEdges) {
       if (_edgeVisible(e, margin)) pathVisible.add(e);
     }
-    // A marching dash is an attention cue. Forty of them at once is not a cue, and each one costs a
-    // path walk per frame — past that they are drawn solid, which reads better anyway.
+    // A marching dash is an attention cue, and each one costs a full path walk per frame. Past a
+    // couple of dozen it is no longer a cue anyway, so they are drawn solid — which reads better.
     final animate = !reduce &&
         (pathVisible.isNotEmpty ||
-            (liveEdges.isNotEmpty && liveEdges.length <= 40));
+            (liveEdges.isNotEmpty && liveEdges.length <= 12));
     _syncDash(animate && liveEdges.isNotEmpty);
 
     Widget edgeLayer = CustomPaint(
@@ -1140,10 +1217,14 @@ class _LiveEdgePainter extends CustomPainter {
     }
   }
 
-  /// 7-on / 9-off marching dashes. The brief travels dashoffset to -320 over the 6s cycle — a
-  /// single 16px period per cycle reads as static, which is what it looked like before.
+  /// Marching dashes. The brief travels dashoffset to -320 over the 6s cycle — a single 16px period
+  /// per cycle reads as static, which is what it looked like before.
+  ///
+  /// The period is 26px rather than the comp's 16px: every dash costs an `extractPath` per frame,
+  /// and at a readable zoom this loop was two thirds of the frame budget. The longer stroke reads
+  /// the same in motion and cut the cost by a third.
   void _dashed(Canvas canvas, Path path, Paint paint) {
-    const on = 7.0, off = 9.0;
+    const on = 10.0, off = 16.0;
     final phase = -320.0 * dash;
     for (final metric in path.computeMetrics()) {
       double d = phase % (on + off);
@@ -1371,6 +1452,60 @@ class _BreathingDot extends StatelessWidget {
           ),
         ),
       );
+}
+
+/// The first thing a new user sees over their own estate: the one question this product exists to
+/// answer, and the single control that answers it. It appears once and never again.
+class _HeroAsk extends StatelessWidget {
+  final ApiClient api;
+  final ValueChanged<String> onPick;
+  final VoidCallback onExplore;
+  const _HeroAsk({required this.api, required this.onPick, required this.onExplore});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      // Dimmed rather than hidden: the estate behind is the reason to trust the answer.
+      color: AppColors.canvas.withOpacity(0.72),
+      alignment: Alignment.center,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: GlassPanel(
+          strong: true,
+          padding: const EdgeInsets.fromLTRB(30, 28, 30, 22),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text('Which API are you changing?',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.headlineSmall),
+            const SizedBox(height: 10),
+            const Text(
+              'Pick it and BlipRadius shows who breaks, who to tell, and whether it needs a '
+              'major release.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13.5, height: 1.6, color: AppColors.textMuted),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () async {
+                  final sel = await showGlobalSearch(context, api);
+                  if (sel != null) onPick(sel.api);
+                },
+                icon: const Icon(Icons.search, size: 17),
+                label: const Text('Find my API'),
+              ),
+            ),
+            const SizedBox(height: 6),
+            TextButton(
+              onPressed: onExplore,
+              child: const Text('or explore the estate map'),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
 }
 
 /// Bottom-left: the estate's headline number and how deeply it can be answered.
@@ -1865,7 +2000,12 @@ class FocusBar extends StatelessWidget {
           seg('UPSTREAM', FocusDirection.upstream),
           seg('BOTH', FocusDirection.both),
           const SizedBox(width: 12),
-          FilledButton(onPressed: onHub, child: const Text('Open API hub')),
+          // Name the next step, not the destination.
+          FilledButton.icon(
+            onPressed: onHub,
+            icon: const Icon(Icons.bolt, size: 16),
+            label: const Text('Check a change'),
+          ),
           const SizedBox(width: 6),
           IconButton(
             onPressed: onClose,
@@ -2055,7 +2195,7 @@ class _FirstRunCanvas extends StatelessWidget {
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 640),
               child: SingleChildScrollView(
-                child: FirstRunWizard(api: api, open: open ?? (_, {api, endpoint, field}) {},
+                child: FirstRunWizard(api: api, open: open ?? (_, {api, endpoint, field, check = false}) {},
                     onDone: onDone),
               ),
             ),

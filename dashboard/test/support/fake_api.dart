@@ -103,4 +103,13 @@ Future<void> pumpScreen(WidgetTester tester, Widget child,
   await tester.pump(const Duration(milliseconds: 350));
 }
 
-void noopOpen(int index, {String? api, String? endpoint, String? field}) {}
+void noopOpen(int index, {String? api, String? endpoint, String? field, bool check = false}) {}
+
+/// A first-time user meets the canvas's opening question before they can reach the map. Tests that
+/// drive the map through the shell have to answer it, exactly as a person would.
+Future<void> dismissOpeningAsk(WidgetTester tester) async {
+  final explore = find.text('or explore the estate map');
+  if (explore.evaluate().isEmpty) return;
+  await tester.tap(explore);
+  await tester.pump(const Duration(milliseconds: 250));
+}

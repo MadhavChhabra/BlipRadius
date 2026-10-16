@@ -28,6 +28,7 @@ void main() {
     ));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
+    await dismissOpeningAsk(tester);
   }
 
   /// The canvas publishes focus to the shell in a post-frame callback, which then notifies the bar
